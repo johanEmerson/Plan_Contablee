@@ -24,6 +24,9 @@ import arranque  # noqa: E402
 arranque.preparar_base_de_datos(engine, Base.metadata)
 
 app = Flask(__name__)
+# Detras del proxy de Railway/hosting: usar el esquema y host reales (https, dominio publico).
+from werkzeug.middleware.proxy_fix import ProxyFix  # noqa: E402
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 import auth  # noqa: E402
 from auth import (ROLES_CIERRE, config_get, registrar, requiere_rol,  # noqa: E402

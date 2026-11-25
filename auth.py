@@ -3,6 +3,7 @@ import json
 import secrets
 from datetime import datetime
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Blueprint, abort, g, redirect, render_template, request,
                    session as flask_session, url_for)
@@ -176,7 +177,8 @@ def init_app(app):
                 return _denegado()
             # Proteccion CSRF basica: las mutaciones via fetch deben venir del mismo origen
             origin = request.headers.get("Origin")
-            if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
+            # Se compara solo el dominio: detras de un proxy el esquema (http/https) puede diferir.
+            if origin and urlsplit(origin).netloc.lower() != request.host.lower():
                 return {"ok": False, "error": "Origen no permitido."}, 403
         return None
 
