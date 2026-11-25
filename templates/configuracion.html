@@ -39,6 +39,11 @@
     <p class="note">Ejemplos: 9411 Gastos administrativos, 9511 Gastos de ventas, 9711 Gastos financieros.</p>
   </div>
 
+  <div class="card">
+    {% set sd_en_card = true %}
+    {% include 'partials/cuentas_propias.html' %}
+  </div>
+
   <button class="btn primary" onclick="guardar()"><span class="ic sm">save</span> Guardar configuracion</button>
   {% include 'partials/shell_close.html' %}
   <script>

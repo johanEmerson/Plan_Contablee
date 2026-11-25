@@ -222,22 +222,6 @@
     }
     tr.propia td:first-child { color: #1d6b3a; }
     .acc-cell { white-space: nowrap; text-align: right; padding-right: .6rem !important; }
-    .act-btn {
-      background: transparent; border: none; cursor: pointer; padding: 2px 4px; border-radius: 4px;
-      font-family: 'Material Symbols Rounded'; font-size: 1.05rem; color: #9aa8b6; transition: all .15s ease;
-    }
-    .act-btn:hover { color: var(--primary-2); background: #eaf1fb; }
-    .act-btn.del:hover { color: #c0392b; background: #fdecea; }
-    .sub-form label { display: block; font-size: .75rem; font-weight: 600; color: #4a5568; margin: .7rem 0 .25rem; text-align: left; }
-    .sub-form input { width: 100%; padding: .55rem .65rem; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
-    .sub-code { display: flex; align-items: stretch; }
-    .sub-code .pref {
-      padding: .55rem .65rem; background: #eef3f8; border: 1px solid #cbd5e1; border-right: 0;
-      border-radius: 8px 0 0 8px; font-family: ui-monospace, Consolas, monospace; font-weight: 700; color: var(--primary);
-    }
-    .sub-code input { border-radius: 0 8px 8px 0; font-family: ui-monospace, Consolas, monospace; max-width: 90px; }
-    .sub-padre { text-align: left; font-size: .82rem; color: var(--muted); margin: 0; }
-    .sub-err { color: #c0392b; font-size: .78rem; min-height: 1em; margin-top: .4rem; text-align: left; }
     .empty {
       text-align: center;
       padding: 2rem;
@@ -336,15 +320,7 @@
   </style>
 </head>
 <body>
-  {% set puede_subdividir = usuario_actual and usuario_actual.rol in ('admin', 'contador') %}
   {% macro acciones(r) -%}
-    {%- set puede_subdividir = usuario_actual and usuario_actual.rol in ('admin', 'contador') -%}
-    {%- if puede_subdividir and r['nivel'] >= 3 and r['codigo']|length < 8 -%}
-    <button type="button" class="act-btn sub-btn" data-cod="{{ r['codigo'] }}" data-desc="{{ r['descripcion'] }}" title="Agregar subdivisionaria de {{ r['codigo'] }}">add_circle</button>
-    {%- endif -%}
-    {%- if puede_subdividir and r.propia -%}
-    <button type="button" class="act-btn del del-btn" data-cod="{{ r['codigo'] }}" title="Borrar subdivisionaria">delete</button>
-    {%- endif -%}
     {%- if r['nivel'] >= 4 -%}
     <button type="button" class="fav-btn" data-cod="{{ r['codigo'] }}" title="Marcar como favorita">star</button>
     {%- endif -%}
@@ -384,7 +360,7 @@
     <section class="card" id="buscador">
       <div class="card-head">
         <h2>Catalogo de cuentas PCGE</h2>
-        <span style="font-size:.78rem;color:var(--muted);">{{ "{:,}".format(total_catalogo) }} cuentas disponibles{% if total_propias %} &middot; {{ total_propias }} propia(s) de la empresa{% endif %}{% if puede_subdividir %} &middot; usa <span class="ic sm" style="vertical-align:middle;">add_circle</span> para crear una subdivisionaria{% endif %}</span>
+        <span style="font-size:.78rem;color:var(--muted);">{{ "{:,}".format(total_catalogo) }} cuentas disponibles{% if total_propias %} &middot; {{ total_propias }} propia(s) de la empresa{% endif %}</span>
       </div>
       <div class="card-body">
         <form id="form" class="search-form" method="get" onsubmit="return false;">
@@ -502,102 +478,12 @@
       return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    const PUEDE_SUBDIVIDIR = {{ 'true' if puede_subdividir else 'false' }};
     function accionesHtml(r) {
       let h = '';
-      if (PUEDE_SUBDIVIDIR && r.nivel >= 3 && r.codigo.length < 8)
-        h += '<button type="button" class="act-btn sub-btn" data-cod="' + escapeHtml(r.codigo) + '" data-desc="' + escapeHtml(r.descripcion) + '" title="Agregar subdivisionaria de ' + escapeHtml(r.codigo) + '">add_circle</button>';
-      if (PUEDE_SUBDIVIDIR && r.propia)
-        h += '<button type="button" class="act-btn del del-btn" data-cod="' + escapeHtml(r.codigo) + '" title="Borrar subdivisionaria">delete</button>';
       if (r.nivel >= 4)
         h += '<button type="button" class="fav-btn" data-cod="' + escapeHtml(r.codigo) + '" title="Marcar como favorita">star</button>';
       return h;
     }
-
-    // ===== Subdivisionarias propias de la empresa =====
-    function recargarVista() {
-      if (qInput.value.trim() || elementoSelect.value) buscar();
-      else window.location.reload();
-    }
-
-    function abrirSubdivisionaria(padre, padreDesc) {
-      const backdrop = document.createElement('div');
-      backdrop.className = 'ui-modal-backdrop';
-      backdrop.innerHTML =
-        '<div class="ui-modal info sub-form" role="dialog" aria-modal="true">' +
-          '<div class="ui-modal-icon">account_tree</div>' +
-          '<h3>Nueva subdivisionaria</h3>' +
-          '<p class="sub-padre">Debajo de <strong>' + escapeHtml(padre) + '</strong> &middot; ' + escapeHtml(padreDesc) + '</p>' +
-          '<label>Codigo (agrega 1 o 2 digitos)</label>' +
-          '<div class="sub-code"><span class="pref">' + escapeHtml(padre) + '</span><input class="s-suf" inputmode="numeric" maxlength="2" placeholder="1"></div>' +
-          '<label>Descripcion</label>' +
-          '<input class="s-desc" maxlength="150" placeholder="Ej. BCP cuenta corriente soles">' +
-          '<div class="sub-err"></div>' +
-          '<div class="ui-modal-actions">' +
-            '<button type="button" class="ui-cancel">Cancelar</button>' +
-            '<button type="button" class="primary ui-ok">Crear cuenta</button>' +
-          '</div>' +
-        '</div>';
-      document.body.appendChild(backdrop);
-      const suf = backdrop.querySelector('.s-suf');
-      const desc = backdrop.querySelector('.s-desc');
-      const err = backdrop.querySelector('.sub-err');
-      function close() {
-        backdrop.classList.add('leaving');
-        setTimeout(() => backdrop.remove(), 180);
-        document.removeEventListener('keydown', onKey);
-      }
-      function onKey(e) {
-        if (e.key === 'Escape') close();
-        if (e.key === 'Enter') enviar();
-      }
-      function enviar() {
-        err.textContent = '';
-        fetch('/cuentas-propias', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ padre: padre, sufijo: suf.value.trim(), descripcion: desc.value.trim() })
-        })
-          .then(r => r.json())
-          .then(d => {
-            if (!d.ok) { err.textContent = d.error || 'No se pudo crear.'; return; }
-            close();
-            UI.success('Cuenta ' + d.cuenta.codigo + ' ' + d.cuenta.descripcion + ' creada.', 'Subdivisionaria');
-            recargarVista();
-          })
-          .catch(() => { err.textContent = 'Error de conexion.'; });
-      }
-      backdrop.querySelector('.ui-ok').addEventListener('click', enviar);
-      backdrop.querySelector('.ui-cancel').addEventListener('click', close);
-      backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
-      document.addEventListener('keydown', onKey);
-      suf.addEventListener('input', () => { suf.value = suf.value.replace(/[^0-9]/g, ''); });
-      setTimeout(() => suf.focus(), 30);
-    }
-
-    document.addEventListener('click', function (e) {
-      const sub = e.target.closest('.sub-btn');
-      if (sub) {
-        e.stopPropagation();
-        abrirSubdivisionaria(sub.dataset.cod, sub.dataset.desc);
-        return;
-      }
-      const del = e.target.closest('.del-btn');
-      if (!del) return;
-      e.stopPropagation();
-      const cod = del.dataset.cod;
-      UI.confirm({ type: 'danger', title: 'Borrar cuenta ' + cod, msg: 'Solo se puede borrar si no tiene movimientos ni subcuentas.', confirmText: 'Borrar' })
-        .then(ok => {
-          if (!ok) return;
-          fetch('/cuentas-propias/' + encodeURIComponent(cod), { method: 'DELETE' })
-            .then(r => r.json())
-            .then(d => {
-              if (!d.ok) { UI.error(d.error || 'No se pudo borrar.'); return; }
-              UI.info('Cuenta ' + cod + ' borrada.');
-              recargarVista();
-            });
-        });
-    });
 
     function toggleElem(el) {
       el.parentElement.classList.toggle('open');
