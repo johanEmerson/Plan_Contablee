@@ -215,11 +215,6 @@ def _iniciar_sesion(u):
     g.empresa_id = u.empresa_id
 
 
-def _hay_usuarios():
-    with SessionLocal() as s:
-        return (s.execute(select(func.count(Usuario.id))).scalar() or 0) > 0
-
-
 def _next_seguro(nxt):
     if nxt and nxt.startswith("/") and not nxt.startswith("//"):
         return nxt
@@ -228,8 +223,6 @@ def _next_seguro(nxt):
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
-    if not _hay_usuarios():
-        return redirect(url_for("auth.registro"))
     if g.usuario:
         return redirect("/")
     error = None
