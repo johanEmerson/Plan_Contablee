@@ -103,10 +103,12 @@
           <span class="ic">history</span> Auditoria
         </a>
         {% endif %}
-        {% if usuario_actual and usuario_actual.rol == 'admin' %}
+        {% if usuario_actual and usuario_actual.es_superadmin %}
         <a class="app-nav-link {% if active == 'usuarios' %}active{% endif %}" href="/usuarios">
           <span class="ic">manage_accounts</span> Usuarios
         </a>
+        {% endif %}
+        {% if usuario_actual and usuario_actual.rol == 'admin' %}
         <a class="app-nav-link {% if active == 'configuracion' %}active{% endif %}" href="/configuracion">
           <span class="ic">settings</span> Configuracion
         </a>
@@ -134,11 +136,12 @@
     </div>
     <div class="app-topbar-actions">
       {% if usuario_actual %}
-      <span class="app-user" title="{{ ROLES.get(usuario_actual.rol, '') }}">
+      {% set _sub = 'Administrador' if usuario_actual.es_superadmin else ((empresa_actual.razon_social|truncate(28, True, '…')) if empresa_actual and empresa_actual.razon_social else ROLES.get(usuario_actual.rol, '')) %}
+      <span class="app-user" title="{{ _sub }}">
         <span class="app-user-avatar" aria-hidden="true">{{ (usuario_actual.nombre or usuario_actual.username or '?')[:1]|upper }}</span>
         <span class="app-user-text">
           <span class="app-user-name">{{ usuario_actual.nombre }}</span>
-          <span class="app-user-rol">{{ ROLES.get(usuario_actual.rol, usuario_actual.rol) }}</span>
+          <span class="app-user-rol">{{ _sub }}</span>
         </span>
       </span>
       <a href="/logout" class="app-logout" title="Cerrar sesion">
@@ -162,7 +165,7 @@
       'ejercicio':      ('event_available', 'Asientos de destino (clase 9) y cierre del ejercicio contable.'),
       'importar':       ('upload_file', 'Carga asientos de forma masiva desde una plantilla de Excel.'),
       'auditoria':      ('history', 'Bitacora de altas, ediciones, anulaciones y cierres, con usuario y fecha.'),
-      'usuarios':       ('manage_accounts', 'Crea usuarios, asigna roles y controla quien puede hacer cada cambio.'),
+      'usuarios':       ('manage_accounts', 'Cuentas registradas en la aplicacion, su actividad y su estado.'),
       'configuracion':  ('settings', 'Datos de la empresa, tasa de IGV y cuentas de destino.'),
     } %}
     {% set _c = _cab.get(active, ('article', '')) %}

@@ -189,15 +189,18 @@ gunicorn app:app --bind 0.0.0.0:8000 --workers 3
 ## Primer uso
 
 1. Inicia la aplicación y abre el navegador.
-2. Como todavía no hay usuarios, el sistema te lleva a **Crear administrador** (`/setup`). Usa un usuario de al menos 3 caracteres y una contraseña de al menos 8.
-3. Entra a **Mantenimiento → Configuración** y registra:
-   - el **RUC y la razón social** de la empresa (obligatorios para el PLE y los estados financieros);
-   - la **tasa de IGV** (18 % general o 10.5 % para MYPE de restaurantes y hoteles);
-   - si la empresa **usa la clase 9** y la distribución de los destinos.
-4. Crea los usuarios del equipo en **Mantenimiento → Usuarios**, cada uno con su rol.
-5. Registra tu primer asiento en **Crear asiento → Usar plantilla**.
+2. Crea tu cuenta en **Crear cuenta** (`/registro`). **La primera cuenta del sistema es la del dueño de la aplicación**: es la única que ve **Mantenimiento → Usuarios**.
+3. Registra los datos de la empresa (RUC, razón social, IGV y, si quieres, sus subdivisionarias).
+4. Registra tu primer asiento en **Crear asiento → Usar plantilla**.
 
-El uso diario de cada pantalla está explicado en el **[Manual de usuario](MANUAL.md)**.
+### Cuentas y empresas
+
+- Cualquier persona puede crear su cuenta en `/registro`. Cada cuenta tiene su **propia empresa y sus propios datos** (asientos, entidades, cierres, configuración, subdivisionarias, favoritas, auditoría); nadie ve los datos de otra cuenta.
+- La separación es automática: todas las tablas con `empresa_id` (ver `models.DeEmpresa`) se filtran por la empresa del usuario conectado en `tenant.py`.
+- El dueño de la aplicación (`usuario.es_superadmin`) ve en **Usuarios** cuántas cuentas hay, su actividad y puede activarlas, desactivarlas o cambiarles la contraseña. No ve la contabilidad de nadie.
+- Al migrar una base anterior, sus datos quedan en la cuenta del administrador más antiguo, que pasa a ser el dueño.
+
+El uso diario está explicado en el **[Manual de uso](MANUAL_DE_USO.md)** (para los usuarios) y en el **[Manual técnico de pantallas](MANUAL.md)**.
 
 ---
 
@@ -274,7 +277,9 @@ Plan_Contable/
 ├── templates/             # Vistas Jinja2 (una por pantalla)
 │   └── partials/          # Menú lateral, barra superior y cabecera de cada pantalla
 ├── respaldos/             # Respaldos automáticos de la base (no se suben a git)
-├── MANUAL.md              # Manual de usuario
+├── MANUAL.md              # Manual de pantallas (detallado)
+├── MANUAL_DE_USO.md       # Manual de uso para el público
+├── tenant.py              # Separacion de datos por cuenta/empresa
 └── README.md
 ```
 
@@ -348,7 +353,7 @@ pg_dump "$DATABASE_URL" > respaldo_$(date +%Y%m%d).sql
 | La consulta de RUC o tipo de cambio falla | Revisa la conexión a internet o configura `APIS_NET_PE_TOKEN`. |
 | Los cambios de diseño no se ven | Recarga sin caché con `Ctrl + F5`. Si cambiaste plantillas (`templates/`), cierra la ventana negra y vuelve a abrir `iniciar.bat`: las plantillas se cargan al iniciar. Si aún se ve lo anterior, revisa que no quede otra ventana del sistema abierta ocupando el puerto. |
 | `Address already in use` | El puerto está ocupado: cierra la otra instancia o usa `PORT=5001`. |
-| Olvidé la contraseña del administrador | Otro administrador puede cambiarla en **Usuarios**. Si no hay otro, contacta al responsable técnico. |
+| Un usuario olvidó su contraseña | El dueño de la aplicación la cambia en **Usuarios** (botón de la llave). |
 
 ---
 

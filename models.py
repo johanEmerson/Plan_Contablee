@@ -23,11 +23,27 @@ class Base(DeclarativeBase):
     pass
 
 
-class Asiento(Base):
+class Empresa(Base):
+    """Cada cuenta registrada es una empresa con sus propios datos contables.
+    Los datos de la empresa (RUC, razon social, IGV...) viven en Config."""
+    __tablename__ = "empresa"
+
+    id = Column(Integer, primary_key=True)
+    activo = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DeEmpresa:
+    """Marca las tablas cuyos datos pertenecen a una empresa. Las consultas se
+    filtran solas por la empresa del usuario conectado (ver tenant.py)."""
+    empresa_id = Column(Integer, nullable=False, index=True)
+
+
+class Asiento(DeEmpresa, Base):
     __tablename__ = "asiento"
 
     id = Column(Integer, primary_key=True)
-    numero = Column(String(20), nullable=False, unique=True)
+    numero = Column(String(20), nullable=False)
     fecha = Column(Date, nullable=False)
     glosa = Column(String(500), nullable=False, default="")
     moneda = Column(String(3), nullable=False, default="PEN")
@@ -81,14 +97,15 @@ class Asiento(Base):
     __table_args__ = (
         Index("ix_asiento_fecha", "fecha"),
         Index("ix_asiento_operacion_id", "operacion_id"),
+        UniqueConstraint("empresa_id", "numero", name="uq_asiento_empresa_numero"),
     )
 
 
-class Entidad(Base):
+class Entidad(DeEmpresa, Base):
     __tablename__ = "entidad"
 
     id = Column(Integer, primary_key=True)
-    ruc = Column(String(11), nullable=False, unique=True)
+    ruc = Column(String(11), nullable=False)
     razon_social = Column(String(300), nullable=False, default="")
     nombre_comercial = Column(String(300), nullable=True)
     estado = Column(String(40), nullable=True)
@@ -105,10 +122,11 @@ class Entidad(Base):
 
     __table_args__ = (
         Index("ix_entidad_razon_social", "razon_social"),
+        UniqueConstraint("empresa_id", "ruc", name="uq_entidad_empresa_ruc"),
     )
 
 
-class CierreMes(Base):
+class CierreMes(DeEmpresa, Base):
     __tablename__ = "cierre_mes"
 
     id = Column(Integer, primary_key=True)
@@ -119,7 +137,7 @@ class CierreMes(Base):
     nota = Column(String(300), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("year", "month", name="uq_cierre_year_month"),
+        UniqueConstraint("empresa_id", "year", "month", name="uq_cierre_empresa_year_month"),
         CheckConstraint("month >= 1 AND month <= 12", name="ck_cierre_month"),
     )
 
@@ -136,13 +154,17 @@ class Usuario(Base):
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     ultimo_login = Column(DateTime, nullable=True)
+    # Empresa a la que pertenece el usuario (cada empresa ve solo sus datos).
+    empresa_id = Column(Integer, ForeignKey("empresa.id"), nullable=True, index=True)
+    # Dueno de la plataforma: ve el panel con empresas y usuarios registrados.
+    es_superadmin = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         CheckConstraint("rol IN ('admin','contador','asistente','lectura')", name="ck_usuario_rol"),
     )
 
 
-class Auditoria(Base):
+class Auditoria(DeEmpresa, Base):
     """Bitacora inalterable: la app solo inserta, nunca actualiza ni borra."""
     __tablename__ = "auditoria"
 
@@ -163,15 +185,16 @@ class Auditoria(Base):
     )
 
 
-class Config(Base):
-    """Configuracion de la empresa (clave/valor)."""
+class Config(DeEmpresa, Base):
+    """Configuracion de cada empresa (clave/valor). empresa_id = 0: valores globales."""
     __tablename__ = "config"
 
+    empresa_id = Column(Integer, primary_key=True)
     clave = Column(String(60), primary_key=True)
     valor = Column(Text, nullable=True)
 
 
-class AsientoLinea(Base):
+class AsientoLinea(DeEmpresa, Base):
     __tablename__ = "asiento_linea"
 
     id = Column(Integer, primary_key=True)

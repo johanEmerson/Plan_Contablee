@@ -21,7 +21,7 @@ Guía de cada apartado del sistema, en el mismo orden del menú lateral.
 
 | Pantalla | Qué hace |
 |---|---|
-| **Crear administrador** (`/setup`) | Solo aparece la primera vez, cuando todavía no hay usuarios. Crea el usuario administrador principal. |
+| **Crear cuenta** (`/registro`) | Cualquier persona crea su cuenta y luego registra los datos de su empresa. Cada cuenta tiene sus propios datos. La primera cuenta del sistema es la del dueño de la aplicación. |
 | **Iniciar sesión** (`/login`) | Todas las pantallas exigen iniciar sesión. Cada persona debe usar su propio usuario para que la auditoría registre quién hizo cada cambio. |
 | **Salir** | Botón en la barra superior (junto a tu nombre). Cierra la sesión. |
 
@@ -196,7 +196,7 @@ En el PLE, los asientos de cierre usan el correlativo **C** y la apertura el cor
 | **Cierres de mes** (`/cierres`) | Cierra un mes para **bloquearlo**: no se pueden crear, editar ni anular asientos en ese periodo. Cerrar lo puede hacer el contador o el admin. **Reabrir solo lo puede hacer el administrador, con un motivo obligatorio** que queda en la auditoría. |
 | **Importar Excel** (`/importar`) | Carga masiva de asientos: 1) descarga la plantilla, 2) súbela llena, 3) revisa la previsualización (indica qué asientos no cuadran) y 4) confirma. Si algún asiento cae en un mes cerrado, la importación se cancela completa. |
 | **Auditoría** (`/auditoria`) | Bitácora de todo lo que pasa en el sistema: altas, ediciones (con los datos anteriores y los nuevos), anulaciones, cierres, reaperturas, exportaciones PLE e inicios de sesión. Muestra el usuario, la fecha y el motivo. **Nadie puede modificarla ni borrarla.** Filtra por entidad, ID y usuario. *(Admin y contador.)* |
-| **Usuarios** (`/usuarios`) | Crear usuarios, cambiar su rol, cambiar su contraseña y activarlos o desactivarlos. Los usuarios no se eliminan para no perder la trazabilidad. *(Solo admin.)* |
+| **Usuarios** (`/usuarios`) | Cuentas registradas en la aplicación, su actividad (registro, último ingreso, asientos) y su estado. Permite activarlas, desactivarlas y cambiarles la contraseña. *(Solo el dueño de la aplicación.)* |
 | **Configuración** (`/configuracion`) | **RUC y razón social** de la empresa (necesarios para el PLE y los estados financieros), la **tasa de IGV** (18 % general o 10.5 % para MYPE de restaurantes y hoteles), si la empresa **usa la clase 9** y la **distribución de los destinos** (cuentas 9xxx y porcentajes, que deben sumar 100 %). *(Solo admin.)* |
 
 ---

@@ -28,6 +28,7 @@ app = Flask(__name__)
 from werkzeug.middleware.proxy_fix import ProxyFix  # noqa: E402
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+import tenant  # noqa: E402,F401  (activa el filtro de datos por empresa)
 import auth  # noqa: E402
 from auth import (ROLES_CIERRE, config_get, registrar, requiere_rol,  # noqa: E402
                   snapshot_asiento, usuario_actual)
@@ -396,7 +397,8 @@ for c in CUENTAS_PCGE:
 # la referencia): catalogo oficial + subdivisionarias propias de la empresa.
 CUENTAS = []
 CUENTAS_POR_CODIGO = {}
-_PROPIAS_RAW = None  # ultimo JSON leido de config, para recargar solo si cambia
+_PROPIAS_RAW = None  # JSON de subdivisionarias del catalogo cargado ahora
+_CATALOGOS = {}      # JSON de subdivisionarias -> (todas, por_codigo), ya armados
 
 MAX_DIGITOS_CUENTA = 8
 
@@ -409,8 +411,9 @@ def _cuentas_propias():
 
 
 def _armar_catalogo(propias):
-    todas = list(CUENTAS_PCGE)
-    oficiales = {c["codigo"]: c for c in CUENTAS_PCGE}
+    # Copias: la marca "hoja" de una cuenta oficial depende de las subdivisionarias de cada empresa.
+    oficiales = {c["codigo"]: dict(c) for c in CUENTAS_PCGE}
+    todas = list(oficiales.values())
     por_codigo = dict(oficiales)
     for p in sorted(propias, key=lambda x: x["codigo"]):
         padre = (por_codigo.get(p.get("padre") or "")
@@ -438,18 +441,30 @@ def _armar_catalogo(propias):
     for i, cod in enumerate(codigos):
         sig = codigos[i + 1] if i + 1 < len(codigos) else ""
         por_codigo[cod]["hoja"] = not sig.startswith(cod)
-    CUENTAS[:] = todas
-    CUENTAS_POR_CODIGO.clear()
-    CUENTAS_POR_CODIGO.update(por_codigo)
+    return todas, por_codigo
 
 
 def sincronizar_catalogo(forzar=False):
-    """Recarga las subdivisionarias si cambiaron en la BD (sirve con varios workers)."""
+    """Deja cargado el catalogo de la empresa del usuario: PCGE + sus subdivisionarias.
+    Se revisa en cada peticion (las subdivisionarias pueden cambiar en otro worker)."""
     global _PROPIAS_RAW
     raw = config_get("cuentas_propias", "[]") or "[]"
-    if forzar or raw != _PROPIAS_RAW:
-        _PROPIAS_RAW = raw
-        _armar_catalogo(_cuentas_propias())
+    if not forzar and raw == _PROPIAS_RAW:
+        return
+    armado = None if forzar else _CATALOGOS.get(raw)
+    if armado is None:
+        try:
+            propias = json.loads(raw)
+        except json.JSONDecodeError:
+            propias = []
+        armado = _armar_catalogo(propias)
+        if len(_CATALOGOS) >= 64:
+            _CATALOGOS.clear()
+        _CATALOGOS[raw] = armado
+    _PROPIAS_RAW = raw
+    CUENTAS[:] = armado[0]
+    CUENTAS_POR_CODIGO.clear()
+    CUENTAS_POR_CODIGO.update(armado[1])
 
 
 sincronizar_catalogo(forzar=True)
@@ -601,11 +616,7 @@ def buscar():
         resultados = [c for c in resultados if es_cuenta_movimiento(c)]
 
     # Priorizar cuentas favoritas al inicio (si hay)
-    try:
-        with open(os.path.join(BASE_DIR, "favoritas.json"), encoding="utf-8") as f:
-            favs = set(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        favs = set()
+    favs = set(_favoritas())
     if favs:
         favs_match = [c for c in resultados if c["codigo"] in favs]
         resto = [c for c in resultados if c["codigo"] not in favs]
@@ -3137,38 +3148,37 @@ def cierres_reabrir(cierre_id):
         return {"ok": True}
 
 
+def _favoritas():
+    try:
+        return list(json.loads(config_get("favoritas", "[]") or "[]"))
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 @app.route("/favoritas", methods=["GET"])
 def favoritas_list():
-    """Lee cuentas marcadas como favoritas (de archivo local)."""
-    try:
-        with open(os.path.join(BASE_DIR, "favoritas.json"), encoding="utf-8") as f:
-            favs = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        favs = []
-    return {"favoritas": favs}
+    """Cuentas marcadas como favoritas por la empresa."""
+    return {"favoritas": _favoritas()}
 
 
 @app.route("/favoritas", methods=["POST"])
 def favoritas_toggle():
     """Agrega/quita una cuenta de favoritas."""
+    from auth import config_set
     data = request.get_json(silent=True) or {}
     codigo = (data.get("codigo") or "").strip()
     if not codigo:
         return {"ok": False, "error": "Falta codigo."}, 400
-    path = os.path.join(BASE_DIR, "favoritas.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            favs = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        favs = []
+    favs = _favoritas()
     if codigo in favs:
         favs.remove(codigo)
         accion = "removed"
     else:
         favs.append(codigo)
         accion = "added"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(favs, f)
+    with SessionLocal() as s:
+        with s.begin():
+            config_set(s, "favoritas", json.dumps(favs))
     return {"ok": True, "accion": accion, "favoritas": favs}
 
 

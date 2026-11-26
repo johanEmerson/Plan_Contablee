@@ -3,74 +3,75 @@
 <head>
   <title>Usuarios</title>
   {% include 'partials/page_head.html' %}
+  <style>
+    .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:.8rem; margin-bottom:1rem; }
+    .kpi { background:var(--surface, #fff); border:1px solid var(--border, #e2e8f0); border-radius:12px; padding:.9rem 1rem; }
+    .kpi .v { font-size:1.7rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
+    .kpi .l { font-size:.78rem; color:var(--muted, #6b7785); margin-top:.2rem; }
+    .buscar { width:min(360px, 100%); margin:.2rem 0 .8rem; padding:.55rem .75rem; border:1px solid var(--border, #cbd5e1); border-radius:9px; font:inherit; background:var(--surface, #fff); color:inherit; }
+    td .emp { display:block; font-size:.78rem; color:var(--muted, #6b7785); }
+    .yo { font-size:.7rem; font-weight:700; color:#e67e22; margin-left:.3rem; }
+  </style>
 </head>
 <body>
   {% set active = 'usuarios' %}
   {% set breadcrumb = [('Mantenimiento',''), ('Usuarios','')] %}
   {% include 'partials/shell_open.html' %}
-  <div class="card">
-    <h2><span class="ic sm">person_add</span> Nuevo usuario</h2>
-    <p class="sub">Cada persona debe tener su propio usuario: asi la auditoria registra quien hizo cada cambio.
-      <strong>Administrador</strong>: todo. <strong>Contador</strong>: registra, cierra meses, ejercicio y PLE.
-      <strong>Asistente</strong>: registra asientos. <strong>Solo lectura</strong>: consulta.</p>
-    <div class="row">
-      <div class="fld"><label>Usuario</label><input id="n-user" maxlength="80"></div>
-      <div class="fld"><label>Nombre</label><input id="n-nombre" maxlength="150"></div>
-      <div class="fld"><label>Contrasena (min. 8)</label><input id="n-pass" type="password" autocomplete="new-password"></div>
-      <div class="fld"><label>Rol</label>
-        <select id="n-rol">{% for k, v in ROLES.items() %}<option value="{{ k }}" {% if k == 'asistente' %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
-      </div>
-      <button class="btn primary" onclick="crear()"><span class="ic sm">add</span> Crear</button>
-    </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v">{{ resumen.total }}</div><div class="l">Usuarios registrados</div></div>
+    <div class="kpi"><div class="v">{{ resumen.nuevos_30 }}</div><div class="l">Nuevos en los ultimos 30 dias</div></div>
+    <div class="kpi"><div class="v">{{ resumen.activos_7 }}</div><div class="l">Entraron en los ultimos 7 dias</div></div>
+    <div class="kpi"><div class="v">{{ resumen.activos_30 }}</div><div class="l">Entraron en los ultimos 30 dias</div></div>
+    <div class="kpi"><div class="v">{{ resumen.sin_empresa }}</div><div class="l">Sin datos de empresa</div></div>
+    <div class="kpi"><div class="v">{{ '{:,}'.format(resumen.asientos) }}</div><div class="l">Asientos registrados en total</div></div>
   </div>
 
   <div class="card">
-    <h2><span class="ic sm">group</span> Usuarios</h2>
-    <table class="t">
-      <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Ultimo ingreso</th><th></th></tr></thead>
+    <h2><span class="ic sm">group</span> Cuentas registradas</h2>
+    <input class="buscar" id="filtro" placeholder="Buscar por usuario, nombre, empresa o RUC" oninput="filtrar(this.value)">
+    <table class="t" id="tabla">
+      <thead><tr><th>Usuario</th><th>Empresa</th><th>RUC</th><th class="num">Asientos</th><th>Registrado</th><th>Ultimo ingreso</th><th>Estado</th><th></th></tr></thead>
       <tbody>
       {% for u in usuarios %}
         <tr>
-          <td class="mono">{{ u.username }}</td>
-          <td>{{ u.nombre }}</td>
-          <td>
-            <select onchange="editar({{ u.id }}, {rol: this.value})" {% if u.id == usuario_actual.id %}disabled{% endif %}>
-              {% for k, v in ROLES.items() %}<option value="{{ k }}" {% if k == u.rol %}selected{% endif %}>{{ v }}</option>{% endfor %}
-            </select>
-          </td>
-          <td>{% if u.activo %}<span class="pill ok">Activo</span>{% else %}<span class="pill bad">Inactivo</span>{% endif %}</td>
+          <td><span class="mono">{{ u.username }}</span>{% if u.es_superadmin %}<span class="yo">DUENO</span>{% endif %}<span class="emp">{{ u.nombre }}</span></td>
+          <td>{{ u.razon_social or '—' }}</td>
+          <td class="mono">{{ u.ruc or '—' }}</td>
+          <td class="num">{{ u.asientos }}</td>
+          <td>{{ u.creado.strftime('%d/%m/%Y') if u.creado else '—' }}</td>
           <td>{{ u.ultimo_login.strftime('%d/%m/%Y %H:%M') if u.ultimo_login else '—' }}</td>
+          <td>{% if u.activo %}<span class="pill ok">Activo</span>{% else %}<span class="pill bad">Desactivado</span>{% endif %}</td>
           <td style="white-space:nowrap;">
-            <button class="btn" onclick="cambiarPass({{ u.id }})"><span class="ic sm">key</span></button>
+            <button class="btn" title="Cambiar contrasena" onclick="cambiarPass({{ u.id }})"><span class="ic sm">key</span></button>
             {% if u.id != usuario_actual.id %}
             <button class="btn" onclick="editar({{ u.id }}, {activo: {{ 'false' if u.activo else 'true' }}})">{{ 'Desactivar' if u.activo else 'Activar' }}</button>
             {% endif %}
           </td>
         </tr>
+      {% else %}
+        <tr><td colspan="8">Todavia no hay cuentas registradas.</td></tr>
       {% endfor %}
       </tbody>
     </table>
-    <p class="note">Los usuarios no se eliminan (se desactivan) para conservar la trazabilidad de la auditoria.</p>
+    <p class="note">Solo tu ves esta pantalla. Aqui no se muestran los datos contables de nadie. Una cuenta desactivada no puede iniciar sesion, pero sus datos se conservan.</p>
   </div>
   {% include 'partials/shell_close.html' %}
   <script>
-    function enviar(url, method, body, okMsg) {
-      return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    function filtrar(q) {
+      q = q.trim().toLowerCase();
+      document.querySelectorAll('#tabla tbody tr').forEach(function (tr) {
+        tr.style.display = !q || tr.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    }
+    function editar(id, cambios) {
+      return fetch('/usuarios/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cambios) })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.ok) { UI.success(okMsg, 'Listo'); setTimeout(function () { location.reload(); }, 600); }
+          if (d.ok) { UI.success('Cuenta actualizada.', 'Listo'); setTimeout(function () { location.reload(); }, 600); }
           else UI.error(d.error || 'Error', 'No se pudo guardar');
         });
     }
-    function crear() {
-      enviar('/usuarios', 'POST', {
-        username: document.getElementById('n-user').value,
-        nombre: document.getElementById('n-nombre').value,
-        password: document.getElementById('n-pass').value,
-        rol: document.getElementById('n-rol').value
-      }, 'Usuario creado.');
-    }
-    function editar(id, cambios) { enviar('/usuarios/' + id, 'PUT', cambios, 'Usuario actualizado.'); }
     async function cambiarPass(id) {
       var p = await UI.prompt({ type: 'info', icon: 'key', title: 'Nueva contrasena', msg: 'Minimo 8 caracteres.', minLength: 8, confirmText: 'Guardar' });
       if (p) editar(id, { password: p });

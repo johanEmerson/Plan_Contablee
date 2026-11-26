@@ -1,7 +1,9 @@
 """Usuarios, sesiones, roles y bitacora de auditoria."""
 import json
+import re
 import secrets
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -10,8 +12,9 @@ from flask import (Blueprint, abort, g, redirect, render_template, request,
 from sqlalchemy import func, select
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import tenant
 from db import SessionLocal
-from models import Auditoria, Config, Usuario
+from models import Asiento, Auditoria, Config, Empresa, Usuario
 
 bp = Blueprint("auth", __name__)
 
@@ -25,23 +28,28 @@ ROLES_ESCRITURA = {"admin", "contador", "asistente"}
 ROLES_CIERRE = {"admin", "contador"}
 
 # Endpoints accesibles sin sesion
-PUBLICOS = {"auth.login", "auth.setup", "static"}
+PUBLICOS = {"auth.login", "auth.logout", "auth.setup", "auth.registro", "static"}
 
 
 # ---------------------------------------------------------------- Config util
 
 def config_get(clave, default=None):
+    """Valor de configuracion de la empresa del usuario conectado."""
+    eid = tenant.empresa_id_actual()
+    if eid is None or eid == tenant.SIN_EMPRESA:
+        return default
     with SessionLocal() as s:
-        row = s.get(Config, clave)
+        row = s.get(Config, {"empresa_id": eid, "clave": clave})
         return row.valor if row and row.valor is not None else default
 
 
 def config_set(s, clave, valor):
-    row = s.get(Config, clave)
+    eid = tenant.empresa_id_actual()
+    row = s.get(Config, {"empresa_id": eid, "clave": clave})
     if row:
         row.valor = valor
     else:
-        s.add(Config(clave=clave, valor=valor))
+        s.add(Config(empresa_id=eid, clave=clave, valor=valor))
 
 
 def ruc_valido(ruc: str) -> bool:
@@ -56,6 +64,8 @@ def ruc_valido(ruc: str) -> bool:
 
 
 def empresa_basica():
+    if tenant.empresa_id_actual() in (None, tenant.SIN_EMPRESA):
+        return {"ruc": "", "razon_social": "", "tasa_igv": "18"}
     with SessionLocal() as s:
         filas = {c.clave: c.valor for c in s.execute(
             select(Config).where(Config.clave.in_(("empresa_ruc", "empresa_razon_social", "tasa_igv")))
@@ -76,9 +86,9 @@ def _secret_key():
         return env
     with SessionLocal() as s:
         with s.begin():
-            row = s.get(Config, "secret_key")
+            row = s.get(Config, {"empresa_id": 0, "clave": "secret_key"})
             if not row:
-                row = Config(clave="secret_key", valor=secrets.token_hex(32))
+                row = Config(empresa_id=0, clave="secret_key", valor=secrets.token_hex(32))
                 s.add(row)
             return row.valor
 
@@ -159,12 +169,14 @@ def init_app(app):
     @app.before_request
     def _cargar_usuario():
         g.usuario = None
+        g.empresa_id = None
         uid = flask_session.get("uid")
-        if uid:
+        if uid and request.endpoint != "static":
             with SessionLocal() as s:
                 u = s.get(Usuario, uid)
-                if u and u.activo:
-                    g.usuario = {"id": u.id, "username": u.username, "nombre": u.nombre or u.username, "rol": u.rol}
+                if u and u.activo and u.empresa_id:
+                    g.usuario = _datos_sesion(u)
+                    g.empresa_id = u.empresa_id
         if request.endpoint in PUBLICOS:
             return None
         if not g.usuario:
@@ -190,6 +202,19 @@ def init_app(app):
 
 # ---------------------------------------------------------------- Rutas
 
+def _datos_sesion(u):
+    return {"id": u.id, "username": u.username, "nombre": u.nombre or u.username, "rol": u.rol,
+            "es_superadmin": bool(u.es_superadmin)}
+
+
+def _iniciar_sesion(u):
+    flask_session.clear()
+    flask_session["uid"] = u.id
+    flask_session.permanent = True
+    g.usuario = _datos_sesion(u)
+    g.empresa_id = u.empresa_id
+
+
 def _hay_usuarios():
     with SessionLocal() as s:
         return (s.execute(select(func.count(Usuario.id))).scalar() or 0) > 0
@@ -204,7 +229,9 @@ def _next_seguro(nxt):
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if not _hay_usuarios():
-        return redirect(url_for("auth.setup"))
+        return redirect(url_for("auth.registro"))
+    if g.usuario:
+        return redirect("/")
     error = None
     if request.method == "POST":
         username = (request.form.get("username") or "").strip().lower()
@@ -212,49 +239,92 @@ def login():
         with SessionLocal() as s:
             with s.begin():
                 u = s.execute(select(Usuario).where(Usuario.username == username)).scalar_one_or_none()
-                if u and u.activo and check_password_hash(u.password_hash, password):
+                if u and check_password_hash(u.password_hash, password) and not (u.activo and u.empresa_id):
+                    error = "Tu cuenta esta desactivada."
+                elif u and check_password_hash(u.password_hash, password):
                     u.ultimo_login = datetime.utcnow()
-                    flask_session.clear()
-                    flask_session["uid"] = u.id
-                    flask_session.permanent = True
-                    g.usuario = {"username": u.username}
+                    _iniciar_sesion(u)
                     registrar(s, "login", "usuario", u.id)
                     destino = _next_seguro(request.args.get("next"))
                     # Primer ingreso del administrador sin empresa configurada: pedirla ahora.
                     if u.rol == "admin" and not empresa_basica()["ruc"]:
                         return redirect(url_for("auth.empresa_inicio", next=destino))
                     return redirect(destino)
-        error = "Usuario o contrasena incorrectos."
+        error = error or "Usuario o contrasena incorrectos."
     return render_template("login.html", error=error, modo="login")
 
 
-@bp.route("/setup", methods=["GET", "POST"])
+@bp.route("/setup")
 def setup():
-    """Primer uso: crea el usuario administrador."""
-    if _hay_usuarios():
-        return redirect(url_for("auth.login"))
+    """Ruta antigua del primer uso: ahora cada persona crea su cuenta en /registro."""
+    return redirect(url_for("auth.registro"))
+
+
+USUARIO_RE = re.compile(r"^[a-z0-9._-]{3,40}$")
+_intentos_registro = {}  # ip -> [timestamps]
+REGISTROS_POR_HORA = 5
+
+
+def _limite_registro(ip):
+    """Frena la creacion masiva de cuentas desde una misma conexion."""
+    ahora = time.time()
+    lista = [x for x in _intentos_registro.get(ip, []) if ahora - x < 3600]
+    _intentos_registro[ip] = lista
+    if len(lista) >= REGISTROS_POR_HORA:
+        return True
+    lista.append(ahora)
+    return False
+
+
+@bp.route("/registro", methods=["GET", "POST"])
+def registro():
+    """Crear cuenta. Cada cuenta tiene su propio espacio de datos (sus asientos,
+    su configuracion, sus subdivisionarias). La primera cuenta del sistema es la
+    del dueno de la aplicacion."""
+    if g.usuario:
+        return redirect("/")
     error = None
+    datos = {"nombre": "", "username": ""}
     if request.method == "POST":
+        nombre = " ".join((request.form.get("nombre") or "").split())[:150]
         username = (request.form.get("username") or "").strip().lower()
-        nombre = (request.form.get("nombre") or "").strip()
         password = request.form.get("password") or ""
-        if len(username) < 3 or len(password) < 8:
-            error = "Usuario de al menos 3 caracteres y contrasena de al menos 8."
+        password2 = request.form.get("password2") or ""
+        datos = {"nombre": nombre, "username": username}
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        if request.form.get("sitio_web"):  # campo trampa: solo lo llenan los robots
+            error = "No se pudo crear la cuenta."
+        elif len(nombre) < 3:
+            error = "Escribe tu nombre completo."
+        elif not USUARIO_RE.match(username):
+            error = ("El usuario debe tener de 3 a 40 caracteres: letras minusculas, numeros, "
+                     "punto o guiones, sin espacios.")
+        elif len(password) < 8:
+            error = "La contrasena debe tener al menos 8 caracteres."
+        elif password != password2:
+            error = "Las contrasenas no coinciden."
         else:
             with SessionLocal() as s:
                 with s.begin():
-                    u = Usuario(username=username, nombre=nombre or username, rol="admin",
-                                password_hash=generate_password_hash(password))
-                    s.add(u)
-                    s.flush()
-                    g.usuario = {"username": username}
-                    registrar(s, "crear", "usuario", u.id, despues={"username": username, "rol": "admin"})
-                    uid = u.id
-            flask_session.clear()
-            flask_session["uid"] = uid
-            flask_session.permanent = True
-            return redirect(url_for("auth.empresa_inicio"))
-    return render_template("login.html", error=error, modo="setup")
+                    if s.execute(select(Usuario.id).where(Usuario.username == username)).first():
+                        error = "Ese usuario ya existe. Elige otro."
+                    elif _limite_registro(ip):
+                        error = "Se crearon demasiadas cuentas desde esta conexion. Intenta en una hora."
+                    else:
+                        primero = not s.execute(select(Usuario.id).limit(1)).first()
+                        emp = Empresa()
+                        s.add(emp)
+                        s.flush()
+                        u = Usuario(username=username, nombre=nombre, rol="admin", empresa_id=emp.id,
+                                    es_superadmin=primero, ultimo_login=datetime.utcnow(),
+                                    password_hash=generate_password_hash(password))
+                        s.add(u)
+                        s.flush()
+                        _iniciar_sesion(u)
+                        registrar(s, "crear", "usuario", u.id, despues={"username": username})
+            if not error:
+                return redirect(url_for("auth.empresa_inicio"))
+    return render_template("login.html", error=error, modo="registro", datos=datos)
 
 
 @bp.route("/empresa/inicio", methods=["GET", "POST"])
@@ -298,68 +368,69 @@ def logout():
     return redirect(url_for("auth.login"))
 
 
+def requiere_dueno(fn):
+    """Solo el dueno de la aplicacion (es_superadmin)."""
+    @wraps(fn)
+    def wrapper(*a, **kw):
+        u = getattr(g, "usuario", None)
+        if not u or not u.get("es_superadmin"):
+            return _denegado()
+        return fn(*a, **kw)
+    return wrapper
+
+
 @bp.route("/usuarios")
-@requiere_rol("admin")
+@requiere_dueno
 def usuarios():
-    with SessionLocal() as s:
-        rows = s.execute(select(Usuario).order_by(Usuario.username)).scalars().all()
-        lista = [{"id": u.id, "username": u.username, "nombre": u.nombre, "rol": u.rol,
-                  "activo": u.activo, "ultimo_login": u.ultimo_login} for u in rows]
-    return render_template("usuarios.html", usuarios=lista)
-
-
-@bp.route("/usuarios", methods=["POST"])
-@requiere_rol("admin")
-def usuarios_crear():
-    d = request.get_json(silent=True) or {}
-    username = (d.get("username") or "").strip().lower()
-    password = d.get("password") or ""
-    rol = d.get("rol") or "asistente"
-    if len(username) < 3 or len(password) < 8:
-        return {"ok": False, "error": "Usuario >= 3 caracteres y contrasena >= 8."}, 400
-    if rol not in ROLES:
-        return {"ok": False, "error": "Rol invalido."}, 400
-    with SessionLocal() as s:
-        with s.begin():
-            if s.execute(select(Usuario).where(Usuario.username == username)).scalar_one_or_none():
-                return {"ok": False, "error": "Ese usuario ya existe."}, 400
-            u = Usuario(username=username, nombre=(d.get("nombre") or "").strip() or username,
-                        rol=rol, password_hash=generate_password_hash(password))
-            s.add(u)
-            s.flush()
-            registrar(s, "crear", "usuario", u.id, despues={"username": username, "rol": rol})
-    return {"ok": True}
+    """Cuentas registradas en la aplicacion. No muestra datos contables de nadie."""
+    ahora = datetime.utcnow()
+    with tenant.sesion_global() as s:
+        rows = s.execute(select(Usuario).order_by(Usuario.created_at.desc(), Usuario.id.desc())).scalars().all()
+        datos_emp = {}
+        for c in s.execute(select(Config).where(
+                Config.clave.in_(("empresa_ruc", "empresa_razon_social")))).scalars():
+            datos_emp.setdefault(c.empresa_id, {})[c.clave] = c.valor or ""
+        asientos = dict(s.execute(select(Asiento.empresa_id, func.count(Asiento.id))
+                                  .group_by(Asiento.empresa_id)).all())
+    lista = []
+    for u in rows:
+        info = datos_emp.get(u.empresa_id, {})
+        lista.append({
+            "id": u.id, "username": u.username, "nombre": u.nombre, "activo": u.activo,
+            "es_superadmin": u.es_superadmin, "creado": u.created_at, "ultimo_login": u.ultimo_login,
+            "razon_social": info.get("empresa_razon_social") or "", "ruc": info.get("empresa_ruc") or "",
+            "asientos": asientos.get(u.empresa_id, 0),
+        })
+    hace7, hace30 = ahora - timedelta(days=7), ahora - timedelta(days=30)
+    resumen = {
+        "total": len(lista),
+        "activos_7": sum(1 for u in lista if u["ultimo_login"] and u["ultimo_login"] >= hace7),
+        "activos_30": sum(1 for u in lista if u["ultimo_login"] and u["ultimo_login"] >= hace30),
+        "nuevos_30": sum(1 for u in lista if u["creado"] and u["creado"] >= hace30),
+        "sin_empresa": sum(1 for u in lista if not u["ruc"]),
+        "asientos": sum(asientos.values()),
+    }
+    return render_template("usuarios.html", usuarios=lista, resumen=resumen)
 
 
 @bp.route("/usuarios/<int:uid>", methods=["PUT"])
-@requiere_rol("admin")
+@requiere_dueno
 def usuarios_editar(uid):
+    """Activar / desactivar una cuenta o cambiarle la contrasena."""
     d = request.get_json(silent=True) or {}
-    with SessionLocal() as s:
+    with tenant.sesion_global() as s:
         with s.begin():
             u = s.get(Usuario, uid)
             if not u:
                 return {"ok": False, "error": "No existe."}, 404
-            antes = {"rol": u.rol, "activo": u.activo, "nombre": u.nombre}
-            if "rol" in d:
-                if d["rol"] not in ROLES:
-                    return {"ok": False, "error": "Rol invalido."}, 400
-                if u.id == g.usuario["id"] and d["rol"] != "admin":
-                    return {"ok": False, "error": "No puedes quitarte el rol de administrador."}, 400
-                u.rol = d["rol"]
             if "activo" in d:
                 if u.id == g.usuario["id"] and not d["activo"]:
-                    return {"ok": False, "error": "No puedes desactivarte a ti mismo."}, 400
+                    return {"ok": False, "error": "No puedes desactivar tu propia cuenta."}, 400
                 u.activo = bool(d["activo"])
-            if "nombre" in d:
-                u.nombre = (d["nombre"] or "").strip()
             if d.get("password"):
                 if len(d["password"]) < 8:
-                    return {"ok": False, "error": "Contrasena >= 8 caracteres."}, 400
+                    return {"ok": False, "error": "La contrasena debe tener al menos 8 caracteres."}, 400
                 u.password_hash = generate_password_hash(d["password"])
-            registrar(s, "editar", "usuario", u.id, antes=antes,
-                      despues={"rol": u.rol, "activo": u.activo, "nombre": u.nombre,
-                               "password_cambiada": bool(d.get("password"))})
     return {"ok": True}
 
 
